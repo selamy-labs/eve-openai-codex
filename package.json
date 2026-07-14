@@ -14,9 +14,15 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist", "LICENSE", "NOTICE", "README.md"],
+  "files": [
+    "dist",
+    "LICENSE",
+    "NOTICE",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "coverage": "c8 --all --include='src/**/*.ts' --check-coverage --lines 90 --functions 90 --branches 90 --statements 90 tsx --test test/*.test.ts",
     "prepare": "pnpm build",
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit"
@@ -27,6 +33,7 @@
   "devDependencies": {
     "@types/node": "24.10.1",
     "ai": "7.0.19",
+    "c8": "^11.0.0",
     "tsx": "4.21.0",
     "typescript": "6.0.3"
   },

@@ -41,14 +41,16 @@ For Eve, pass `model` directly to `defineAgent`. Set the OpenAI provider option
 ```bash
 pnpm install --frozen-lockfile
 pnpm typecheck
-pnpm test
+pnpm coverage
 pnpm build
 bazel test //...
 ```
 
-The fake server verifies the `/responses` route, all required headers, and the
-non-storage request option. A consumer must still run a live test with an
-authorized ChatGPT Codex account to prove subscription compatibility.
+The suite enforces at least 90% line, branch, function, and statement coverage.
+It covers credential parsing and expiry behavior, then uses a fake server to
+verify the `/responses` route, all required headers, and the non-storage request
+option. A consumer must still run a live test with an authorized ChatGPT Codex
+account to prove subscription compatibility.
 
 ## Upstream path
 

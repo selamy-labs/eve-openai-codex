@@ -27,6 +27,6 @@ jobs:
           repository-cache: true
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
-      - run: pnpm test
+      - run: pnpm coverage
       - run: pnpm build
       - run: bazel test //...
