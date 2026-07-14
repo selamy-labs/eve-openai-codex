@@ -8,6 +8,7 @@ import {
   codexRequestHeaders,
   createCodexProvider,
   decodeJwtClaims,
+  normalizeCodexRequestBody,
   selectCodexCredential,
   type CodexCredentialSource,
 } from "../src/index.js";
@@ -165,6 +166,63 @@ test("builds account-optional Codex headers with a custom user agent", () => {
   assert.equal(headers.get("user-agent"), "codex_cli_rs/test");
 });
 
+test("normalizes the strict Codex Responses request contract", () => {
+  const original = JSON.stringify({
+    instructions: "existing",
+    input: [
+      { role: "developer", content: "developer instructions" },
+      {
+        role: "system",
+        content: [{ type: "input_text", text: "system instructions" }],
+      },
+      { role: "developer", content: [{ type: "image", image_url: "ignored" }] },
+      { role: "user", content: [{ type: "input_text", text: "hello" }] },
+      "preserved",
+    ],
+    include: ["web_search_call.action.sources"],
+    max_output_tokens: 123,
+    temperature: 0.3,
+    store: true,
+    tools: [{ type: "function", name: "bash" }],
+  });
+  const normalized = JSON.parse(String(normalizeCodexRequestBody(original))) as {
+    instructions: string;
+    input: unknown[];
+    include: string[];
+    store: boolean;
+    tool_choice: string;
+    parallel_tool_calls: boolean;
+    max_output_tokens?: number;
+    temperature?: number;
+  };
+
+  assert.equal(
+    normalized.instructions,
+    "existing\n\ndeveloper instructions\n\nsystem instructions",
+  );
+  assert.equal(normalized.input.length, 3);
+  assert.deepEqual(normalized.include, ["reasoning.encrypted_content"]);
+  assert.equal(normalized.store, false);
+  assert.equal(normalized.tool_choice, "auto");
+  assert.equal(normalized.parallel_tool_calls, true);
+  assert.equal("max_output_tokens" in normalized, false);
+  assert.equal("temperature" in normalized, false);
+
+  assert.equal(normalizeCodexRequestBody(null), null);
+  assert.equal(normalizeCodexRequestBody("not-json"), "not-json");
+  assert.equal(normalizeCodexRequestBody("[]"), "[]");
+
+  const withoutTools = JSON.parse(
+    String(
+      normalizeCodexRequestBody(
+        JSON.stringify({ tools: [], tool_choice: "auto", parallel_tool_calls: true }),
+      ),
+    ),
+  ) as Record<string, unknown>;
+  assert.equal("tool_choice" in withoutTools, false);
+  assert.equal("parallel_tool_calls" in withoutTools, false);
+});
+
 test("supports an injected fetch and the default Codex base URL", async () => {
   let observedUrl = "";
   let observedHeaders = new Headers();
@@ -203,6 +261,9 @@ test("injects the Codex wire contract into a Responses request", async () => {
     originator: string;
     userAgent: string;
     store: unknown;
+    instructions: unknown;
+    inputRoles: unknown;
+    include: unknown;
   } = {
     path: "",
     authorization: "",
@@ -210,6 +271,9 @@ test("injects the Codex wire contract into a Responses request", async () => {
     originator: "",
     userAgent: "",
     store: undefined,
+    instructions: undefined,
+    inputRoles: undefined,
+    include: undefined,
   };
   const server = createServer((request, response) => {
     const chunks: Buffer[] = [];
@@ -226,6 +290,11 @@ test("injects the Codex wire contract into a Responses request", async () => {
         originator: String(request.headers.originator ?? ""),
         userAgent: request.headers["user-agent"] ?? "",
         store: body.store,
+        instructions: body.instructions,
+        inputRoles: Array.isArray(body.input)
+          ? body.input.map((item) => (item as { role?: unknown }).role)
+          : undefined,
+        include: body.include,
       };
       response.setHeader("content-type", "application/json");
       response.end(JSON.stringify(completedResponse()));
@@ -246,8 +315,17 @@ test("injects the Codex wire contract into a Responses request", async () => {
     });
     const result = await generateText({
       model: provider.responses("gpt-5.5"),
+      system: "system from Eve",
       prompt: "hello",
-      providerOptions: { openai: { store: false } },
+      maxOutputTokens: 123,
+      temperature: 0.3,
+      providerOptions: {
+        openai: {
+          include: ["web_search_call.results"],
+          store: true,
+          systemMessageMode: "developer",
+        },
+      },
     });
 
     assert.equal(result.text, "ok");
@@ -258,6 +336,9 @@ test("injects the Codex wire contract into a Responses request", async () => {
       originator: "codex_cli_rs",
       userAgent: "codex_cli_rs/0.0.0 (Eve OpenAI Codex)",
       store: false,
+      instructions: "system from Eve",
+      inputRoles: ["user"],
+      include: ["reasoning.encrypted_content"],
     });
   } finally {
     await new Promise<void>((resolve, reject) =>

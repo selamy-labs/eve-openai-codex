@@ -31,7 +31,11 @@ For Eve, pass `model` directly to `defineAgent`. Set the OpenAI provider option
 
 - `CodexCredentialSource` supplies one access credential per request.
 - `createCodexProvider` injects bearer, originator, user-agent, and optional
-  ChatGPT account headers into an AI SDK provider.
+  ChatGPT account headers into an AI SDK provider. Its Responses transport also
+  normalizes Eve/AI SDK requests to the stricter Codex wire contract.
+- `normalizeCodexRequestBody` forces ephemeral storage, moves system/developer
+  input into top-level instructions, preserves encrypted reasoning continuity,
+  and removes response fields that the subscription endpoint rejects.
 - `selectCodexCredential` parses either a credential array or a Hermes-shaped
   `credential_pool.openai-codex` document and returns access data only.
 - No API accepts, returns, exchanges, or persists a refresh token.
