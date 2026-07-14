@@ -11,8 +11,13 @@ export interface CodexAccessCredential {
   label?: string;
 }
 
+export interface CodexCredentialRequest {
+  refresh: boolean;
+  rejectedAccessToken?: string;
+}
+
 export interface CodexCredentialSource {
-  getCredential(): Promise<CodexAccessCredential>;
+  getCredential(request?: CodexCredentialRequest): Promise<CodexAccessCredential>;
 }
 
 export interface CreateCodexProviderOptions {
@@ -28,6 +33,8 @@ export interface SelectCodexCredentialOptions {
 }
 
 type JsonRecord = Record<string, unknown>;
+
+const CREDENTIAL_REFRESH_SKEW_SECONDS = 60;
 
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -96,6 +103,20 @@ export function normalizeCodexRequestBody(
 function isResponsesRequest(input: string | URL | Request): boolean {
   const url = input instanceof Request ? input.url : String(input);
   return new URL(url).pathname.endsWith("/responses");
+}
+
+function isReplayableRequest(
+  input: string | URL | Request,
+  body: BodyInit | null | undefined,
+): boolean {
+  return !(input instanceof Request) && (body == null || typeof body === "string");
+}
+
+function expiresWithinRefreshSkew(credential: CodexAccessCredential): boolean {
+  return (
+    credential.expiresAt !== undefined &&
+    credential.expiresAt <= Date.now() / 1000 + CREDENTIAL_REFRESH_SKEW_SECONDS
+  );
 }
 
 export function decodeJwtClaims(token: string): JsonRecord {
@@ -202,19 +223,38 @@ export function createCodexProvider(options: CreateCodexProviderOptions) {
     baseURL: options.baseURL ?? CODEX_BASE_URL,
     apiKey: "oauth-access-token-is-injected-by-fetch",
     fetch: async (input, init) => {
-      const credential = await options.credentialSource.getCredential();
-      const headers = new Headers(init?.headers);
-      codexRequestHeaders(credential, options.userAgent).forEach((value, key) => {
-        headers.set(key, value);
-      });
       const body = isResponsesRequest(input)
         ? normalizeCodexRequestBody(init?.body)
         : init?.body;
-      if (body !== init?.body) headers.delete("content-length");
-      return request(
-        input,
-        body === undefined ? { ...init, headers } : { ...init, body, headers },
-      );
+      const send = (credential: CodexAccessCredential) => {
+        const headers = new Headers(init?.headers);
+        codexRequestHeaders(credential, options.userAgent).forEach((value, key) => {
+          headers.set(key, value);
+        });
+        if (body !== init?.body) headers.delete("content-length");
+        return request(
+          input,
+          body === undefined ? { ...init, headers } : { ...init, body, headers },
+        );
+      };
+
+      let credential = await options.credentialSource.getCredential({
+        refresh: false,
+      });
+      if (expiresWithinRefreshSkew(credential)) {
+        credential = await options.credentialSource.getCredential({ refresh: true });
+      }
+
+      const response = await send(credential);
+      if (response.status !== 401 || !isReplayableRequest(input, body)) {
+        return response;
+      }
+
+      const refreshedCredential = await options.credentialSource.getCredential({
+        refresh: true,
+        rejectedAccessToken: credential.accessToken,
+      });
+      return send(refreshedCredential);
     },
   });
 }
