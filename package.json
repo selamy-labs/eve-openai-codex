@@ -17,6 +17,7 @@
   "files": ["dist", "LICENSE", "NOTICE", "README.md"],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "prepare": "pnpm build",
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
