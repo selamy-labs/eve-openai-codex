@@ -1,0 +1,4 @@
+common --enable_bzlmod
+test --test_output=errors
+test --test_summary=terse
+try-import %workspace%/.bazelrc.local

@@ -1,0 +1,5 @@
+The Codex endpoint, JWT account-id extraction, and first-party origin header
+behavior were adapted from the MIT-licensed NousResearch/hermes-agent project.
+
+This package is an independent implementation and does not include or require
+the Hermes runtime.

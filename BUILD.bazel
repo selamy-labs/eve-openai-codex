@@ -1,0 +1,29 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library", "js_test")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+
+package(default_visibility = ["//visibility:public"])
+
+npm_link_all_packages(name = "node_modules")
+
+js_library(
+    name = "library",
+    srcs = glob(["src/**/*.ts"]),
+    data = [":node_modules"],
+)
+
+js_test(
+    name = "provider_test",
+    entry_point = "test/provider.test.ts",
+    node_options = ["--import=tsx"],
+    data = [
+        ":library",
+        ":node_modules",
+    ],
+)
+
+exports_files([
+    "LICENSE",
+    "NOTICE",
+    "README.md",
+    "pnpm-lock.yaml",
+])

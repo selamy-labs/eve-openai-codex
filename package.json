@@ -1,0 +1,38 @@
+{
+  "name": "@selamy-labs/eve-openai-codex",
+  "version": "0.1.0",
+  "description": "Composable ChatGPT Codex OAuth provider for Eve and the Vercel AI SDK",
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "LICENSE", "NOTICE", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "4.0.11"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "ai": "7.0.19",
+    "tsx": "4.21.0",
+    "typescript": "6.0.3"
+  },
+  "peerDependencies": {
+    "ai": ">=7 <8"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
