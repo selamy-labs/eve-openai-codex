@@ -10,6 +10,7 @@ import {
   decodeJwtClaims,
   normalizeCodexRequestBody,
   selectCodexCredential,
+  type CodexCredentialRequest,
   type CodexCredentialSource,
 } from "../src/index.js";
 
@@ -251,6 +252,108 @@ test("supports an injected fetch and the default Codex base URL", async () => {
   assert.equal(observedUrl, `${CODEX_BASE_URL}/responses`);
   assert.equal(observedHeaders.get("authorization"), "Bearer injected-token");
   assert.equal(observedHeaders.get("user-agent"), "codex_cli_rs/injected");
+});
+
+test("resolves credentials per request and asks the host to refresh near expiry", async () => {
+  const credentialRequests: (CodexCredentialRequest | undefined)[] = [];
+  const authorizationHeaders: string[] = [];
+  let refreshed = false;
+  const provider = createCodexProvider({
+    credentialSource: {
+      async getCredential(request) {
+        credentialRequests.push(request);
+        if (request?.refresh) refreshed = true;
+        return refreshed
+          ? { accessToken: "fresh-token", expiresAt: 4_000_000_000 }
+          : { accessToken: "expiring-token", expiresAt: 1 };
+      },
+    },
+    async fetch(_input, init) {
+      authorizationHeaders.push(new Headers(init?.headers).get("authorization") ?? "");
+      return Response.json(completedResponse());
+    },
+  });
+  const model = provider.responses("gpt-5.5");
+
+  await generateText({ model, prompt: "first" });
+  await generateText({ model, prompt: "second" });
+
+  assert.deepEqual(credentialRequests, [
+    { refresh: false },
+    { refresh: true },
+    { refresh: false },
+  ]);
+  assert.deepEqual(authorizationHeaders, [
+    "Bearer fresh-token",
+    "Bearer fresh-token",
+  ]);
+});
+
+test("asks the host for a fresh credential and retries one replayable 401", async () => {
+  const credentialRequests: (CodexCredentialRequest | undefined)[] = [];
+  const authorizationHeaders: string[] = [];
+  const provider = createCodexProvider({
+    credentialSource: {
+      async getCredential(request) {
+        credentialRequests.push(request);
+        return {
+          accessToken: request?.refresh ? "rotated-token" : "rejected-token",
+        };
+      },
+    },
+    async fetch(_input, init) {
+      const authorization = new Headers(init?.headers).get("authorization") ?? "";
+      authorizationHeaders.push(authorization);
+      if (authorization === "Bearer rejected-token") {
+        return Response.json({ error: "expired" }, { status: 401 });
+      }
+      return Response.json(completedResponse());
+    },
+  });
+
+  const result = await generateText({
+    maxRetries: 0,
+    model: provider.responses("gpt-5.5"),
+    prompt: "hello",
+  });
+
+  assert.equal(result.text, "ok");
+  assert.deepEqual(credentialRequests, [
+    { refresh: false },
+    { refresh: true, rejectedAccessToken: "rejected-token" },
+  ]);
+  assert.deepEqual(authorizationHeaders, [
+    "Bearer rejected-token",
+    "Bearer rotated-token",
+  ]);
+});
+
+test("never retries a replayable 401 more than once", async () => {
+  let credentialRequests = 0;
+  let httpRequests = 0;
+  const provider = createCodexProvider({
+    credentialSource: {
+      async getCredential() {
+        credentialRequests += 1;
+        return { accessToken: `token-${credentialRequests}` };
+      },
+    },
+    async fetch() {
+      httpRequests += 1;
+      return Response.json({ error: "unauthorized" }, { status: 401 });
+    },
+  });
+
+  await assert.rejects(
+    generateText({
+      maxRetries: 0,
+      model: provider.responses("gpt-5.5"),
+      prompt: "hello",
+    }),
+  );
+
+  assert.equal(credentialRequests, 2);
+  assert.equal(httpRequests, 2);
 });
 
 test("injects the Codex wire contract into a Responses request", async () => {

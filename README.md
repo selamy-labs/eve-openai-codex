@@ -30,6 +30,10 @@ For Eve, pass `model` directly to `defineAgent`. Set the OpenAI provider option
 ## Public contract
 
 - `CodexCredentialSource` supplies one access credential per request.
+- The provider asks the source to refresh credentials that expire within 60
+  seconds. After a replayable request receives `401`, it asks once more with
+  the rejected access token and retries exactly once. The credential source
+  owns any refresh serialization and persistence.
 - `createCodexProvider` injects bearer, originator, user-agent, and optional
   ChatGPT account headers into an AI SDK provider. Its Responses transport also
   normalizes Eve/AI SDK requests to the stricter Codex wire contract.
@@ -39,6 +43,21 @@ For Eve, pass `model` directly to `defineAgent`. Set the OpenAI provider option
 - `selectCodexCredential` parses either a credential array or a Hermes-shaped
   `credential_pool.openai-codex` document and returns access data only.
 - No API accepts, returns, exchanges, or persists a refresh token.
+
+Credential sources may ignore the request argument when another process keeps
+their access token current. Hosts that own refresh use `refresh: true` and the
+optional `rejectedAccessToken` to serialize rotation without exposing refresh
+tokens to this package:
+
+```ts
+const credentialSource: CodexCredentialSource = {
+  async getCredential(request) {
+    return request?.refresh
+      ? credentials.refreshAfter(request.rejectedAccessToken)
+      : credentials.current();
+  },
+};
+```
 
 ## Verification
 
@@ -51,10 +70,11 @@ bazel test //...
 ```
 
 The suite enforces at least 90% line, branch, function, and statement coverage.
-It covers credential parsing and expiry behavior, then uses a fake server to
-verify the `/responses` route, all required headers, and the non-storage request
-option. A consumer must still run a live test with an authorized ChatGPT Codex
-account to prove subscription compatibility.
+It covers credential parsing, expiry behavior, proactive host refresh, bounded
+`401` recovery, and then uses a fake server to verify the `/responses` route,
+all required headers, and the non-storage request option. A consumer must still
+run a live test with an authorized ChatGPT Codex account to prove subscription
+compatibility.
 
 ## Upstream path
 
