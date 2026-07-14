@@ -29,8 +29,22 @@ jobs:
           bazelisk-version: 1.26.0
           bazelisk-cache: true
           repository-cache: true
+      - name: Select BuildBuddy cache config
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: |
+          if [ -n "${BUILDBUDDY_API_KEY}" ]; then
+            echo "::add-mask::${BUILDBUDDY_API_KEY}"
+            echo "BAZEL_CACHE_CONFIG=--config=buildbuddy --remote_header=x-buildbuddy-api-key=${BUILDBUDDY_API_KEY}" >> "${GITHUB_ENV}"
+          else
+            echo "::warning::BUILDBUDDY_API_KEY absent; using a keyless local build"
+            echo "BAZEL_CACHE_CONFIG=" >> "${GITHUB_ENV}"
+          fi
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm coverage
       - run: pnpm build
-      - run: bazel test //...
+      - name: Test with Bazel
+        run: |
+          read -r -a cache_config <<< "${BAZEL_CACHE_CONFIG}"
+          bazel test //... "${cache_config[@]}"
