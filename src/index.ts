@@ -33,6 +33,71 @@ function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function messageText(content: unknown): string | undefined {
+  if (typeof content === "string" && content.trim()) return content.trim();
+  if (!Array.isArray(content)) return undefined;
+
+  const parts = content
+    .filter(isRecord)
+    .filter((part) => part.type === "input_text" || part.type === "text")
+    .map((part) => part.text)
+    .filter((text): text is string => typeof text === "string" && Boolean(text.trim()))
+    .map((text) => text.trim());
+  return parts.length > 0 ? parts.join("\n") : undefined;
+}
+
+export function normalizeCodexRequestBody(
+  body: BodyInit | null | undefined,
+): BodyInit | null | undefined {
+  if (typeof body !== "string") return body;
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(body);
+  } catch {
+    return body;
+  }
+  if (!isRecord(payload)) return body;
+
+  payload.store = false;
+  delete payload.max_output_tokens;
+  delete payload.temperature;
+
+  if (Array.isArray(payload.input)) {
+    const instructions: string[] = [];
+    const input = payload.input.filter((item) => {
+      if (!isRecord(item) || (item.role !== "system" && item.role !== "developer")) {
+        return true;
+      }
+      const text = messageText(item.content);
+      if (!text) return true;
+      instructions.push(text);
+      return false;
+    });
+    if (typeof payload.instructions === "string" && payload.instructions.trim()) {
+      instructions.unshift(payload.instructions.trim());
+    }
+    if (instructions.length > 0) payload.instructions = instructions.join("\n\n");
+    payload.input = input;
+  }
+
+  payload.include = ["reasoning.encrypted_content"];
+  if (Array.isArray(payload.tools) && payload.tools.length > 0) {
+    payload.tool_choice ??= "auto";
+    payload.parallel_tool_calls ??= true;
+  } else {
+    delete payload.tool_choice;
+    delete payload.parallel_tool_calls;
+  }
+
+  return JSON.stringify(payload);
+}
+
+function isResponsesRequest(input: string | URL | Request): boolean {
+  const url = input instanceof Request ? input.url : String(input);
+  return new URL(url).pathname.endsWith("/responses");
+}
+
 export function decodeJwtClaims(token: string): JsonRecord {
   const parts = token.split(".");
   if (parts.length !== 3 || !parts[1]) return {};
@@ -142,7 +207,14 @@ export function createCodexProvider(options: CreateCodexProviderOptions) {
       codexRequestHeaders(credential, options.userAgent).forEach((value, key) => {
         headers.set(key, value);
       });
-      return request(input, { ...init, headers });
+      const body = isResponsesRequest(input)
+        ? normalizeCodexRequestBody(init?.body)
+        : init?.body;
+      if (body !== init?.body) headers.delete("content-length");
+      return request(
+        input,
+        body === undefined ? { ...init, headers } : { ...init, body, headers },
+      );
     },
   });
 }
